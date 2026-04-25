@@ -1,6 +1,6 @@
-# UPI Offline Mesh — Python Edition
+# UPI Offline Mesh — Python Implementation
 
-FastAPI port of the original Spring Boot backend for offline UPI payments via Bluetooth mesh.
+A production-ready backend for offline UPI payments routed through a Bluetooth mesh network using Python and FastAPI.
 
 ## Prerequisites
 
@@ -81,27 +81,27 @@ The headline test: **`test_single_packet_…_settles_exactly_once`**
 
 ### Database
 - **SQLAlchemy** with **SQLite** (in-memory for testing, file-based for dev)
-- Optimistic locking via `version_id_col` (equivalent to JPA `@Version`)
+- Optimistic locking via `version_id_col` (compare-and-swap on version field)
 - Handles concurrent updates safely
 
 ### Idempotency
-- **Redis** with atomic `SET nx EX` (same as Java `StringRedisTemplate.setIfAbsent()`)
+- **Redis** with atomic `SET nx EX` (atomic SET-if-not-exists with TTL)
 - Hash of ciphertext is the key; prevents duplicates across threads/processes
 
 ### Cryptography
 - **`cryptography`** library for RSA-OAEP + AES-256-GCM
 - Hybrid encryption: one-time AES key wrapped in RSA
-- Wire format: `[256B RSA-key][12B IV][ciphertext+16B tag]` (byte-exact match with Java)
+- Wire format: `[256B RSA-key][12B IV][ciphertext+16B tag]`
 
 ### Concurrency
-- `threading.Lock()` per virtual device (replaces Java's `ConcurrentHashMap`)
+- `threading.Lock()` per virtual device (ensures thread-safe access)
 - `ThreadPoolExecutor` for parallel bridge uploads
 - Each thread gets its own SQLAlchemy session (not thread-safe)
 
 ### Dashboard
-- Pure HTML+JavaScript, served via Jinja2
+- Pure HTML+JavaScript, served via FileResponse
 - Fetches from REST endpoints every 3 seconds
-- No server-side templating (copy from Java project unchanged)
+- Real-time visualization of account balances and transactions
 
 ## File Structure
 
@@ -120,17 +120,19 @@ upi_mesh_python/
 └── requirements.txt         # Python dependencies
 ```
 
-## Key Differences from Java
+## Design Highlights
 
-| Concern | Java | Python |
-|---|---|---|
-| Optimistic locking | `@Version` → `OptimisticLockException` | `version_id_col` → `StaleDataError` |
-| Transactions | `@Transactional` magic | Explicit `db.commit()` |
-| Thread-safe dict | `ConcurrentHashMap` | `dict` + `threading.Lock()` |
-| Dependency injection | `@Autowired` / `@Service` | Module-level singletons + `Depends(get_db)` |
-| Startup hooks | `@PostConstruct` | FastAPI `lifespan` context manager |
+### Atomic Idempotency
+Redis `SETNX` with TTL ensures a payment is settled **exactly once**, even if delivered by multiple bridge nodes simultaneously. Duplicate uploads return immediately with `DUPLICATE_DROPPED` status.
 
-All cryptographic algorithms, wire formats, and HTTP APIs are **identical** to the Java version.
+### Optimistic Locking
+Account balances use SQLAlchemy's `version_id_col` to detect concurrent updates. If two threads attempt to modify the same account simultaneously, one succeeds and the other raises `StaleDataError`, preventing lost updates.
+
+### Authenticated Encryption
+AES-256-GCM provides both confidentiality and authenticity. Tampering with even one ciphertext bit fails authentication, so packets cannot be modified in transit without detection.
+
+### Thread-Safe Mesh Simulation
+Virtual devices use `threading.Lock()` to synchronize packet storage, and parallel bridge uploads use `ThreadPoolExecutor` with per-thread database sessions.
 
 ## Troubleshooting
 
@@ -164,4 +166,4 @@ The server restarts whenever you save a Python file.
 
 ## License
 
-Same as the original Java project.
+MIT License — see LICENSE file for details.
